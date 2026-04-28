@@ -359,13 +359,12 @@ module:
           remove: true
 
         update:
-          remove: true
-          # to_async: true
-          # rename: aupdate
-          # calls:
-          #   - func:
-          #       attr: execute_sql
-          #     to_await: true
+          to_async: true
+          rename: aupdate
+          calls:
+            - func:
+                attr: execute_sql
+              to_await: true
 
         iterator:
           # to_async: true

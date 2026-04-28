@@ -1,5 +1,9 @@
 # This file was generated automatically. Do not modify it manually. (based on django 6.0)
+from django_async_backend.db import async_connections
 from django_async_backend.db.models import sql as async_sql
+from django_async_backend.db.transaction import (
+    async_mark_for_rollback_on_error,
+)
 
 """
 The main QuerySet implementation. This provides the public API for the ORM.
@@ -787,9 +791,59 @@ class QuerySet(AltersData):
         """
         query = self.query.clone()
         query.__class__ = sql.DeleteQuery
-        return await query.get_compiler(using).execute_sql(ROW_COUNT)
+        compiler = query.get_compiler(connection=async_connections[using])
+        return await compiler.execute_sql(ROW_COUNT)
 
     _raw_delete.alters_data = True
+
+    async def aupdate(self, **kwargs: Any) -> int:
+        """
+        Update all elements in the current QuerySet, setting all the given
+        fields to the appropriate values.
+        """
+        self._not_support_combined_queries("update")
+        if self.query.is_sliced:
+            raise TypeError(
+                "Cannot update a query once a slice has been taken."
+            )
+        self._for_write = True
+        query = self.query.chain(sql.UpdateQuery)
+        query.add_update_values(kwargs)
+
+        # Inline annotations in order_by(), if possible.
+        new_order_by = []
+        for col in query.order_by:
+            alias = col
+            descending = False
+            if isinstance(alias, str) and alias.startswith("-"):
+                alias = alias.removeprefix("-")
+                descending = True
+            if annotation := query.annotations.get(alias):
+                if getattr(annotation, "contains_aggregate", False):
+                    raise exceptions.FieldError(
+                        f"Cannot update when ordering by an aggregate: "
+                        f"{annotation}"
+                    )
+                if descending:
+                    annotation = annotation.desc()
+                new_order_by.append(annotation)
+            else:
+                new_order_by.append(col)
+        query.order_by = tuple(new_order_by)
+
+        # Clear SELECT clause as all annotation references were inlined by
+        # add_update_values() already.
+        query.clear_select_clause()
+        async with async_mark_for_rollback_on_error(using=self.db):
+            compiler = query.get_compiler(
+                connection=async_connections[self.db]
+            )
+            rows = await compiler.execute_sql(ROW_COUNT)
+        self._result_cache = None
+        return rows
+
+    aupdate.alters_data = True
+    aupdate.queryset_only = False
 
     async def _update(self, values, returning_fields=None):
         """
@@ -807,11 +861,12 @@ class QuerySet(AltersData):
         # Clear any annotations so that they won't be present in subqueries.
         query.annotations = {}
         self._result_cache = None
-        if returning_fields is None:
-            return await query.get_compiler(self.db).execute_sql(ROW_COUNT)
-        return query.get_compiler(self.db).execute_returning_sql(
-            returning_fields
+        compiler = query.get_compiler(
+            connection=async_connections[self.db]
         )
+        if returning_fields is None:
+            return await compiler.execute_sql(ROW_COUNT)
+        return await compiler.execute_returning_sql(returning_fields)
 
     _update.alters_data = True
     _update.queryset_only = False
@@ -1266,9 +1321,8 @@ class QuerySet(AltersData):
             unique_fields=unique_fields,
         )
         query.insert_values(fields, objs, raw=raw)
-        return await query.get_compiler(using=using).execute_sql(
-            returning_fields
-        )
+        compiler = query.get_compiler(connection=async_connections[using])
+        return await compiler.execute_sql(returning_fields)
 
     _insert.alters_data = True
     _insert.queryset_only = False
