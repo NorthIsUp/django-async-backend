@@ -266,9 +266,15 @@ module:
               to_await: true
 
         bulk_update:
-          # to_async: true
-          # rename: abulk_update
-          remove: true
+          to_async: true
+          rename: abulk_update
+          calls:
+            - func:
+                attr: update
+              to_await: true
+              rename:
+                func:
+                  attr: aupdate
 
         get_or_create:
           # to_async: true
