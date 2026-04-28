@@ -296,9 +296,9 @@ async def main():
 | `__aiter__`                         | ✅        |          |
 | `__repr__`                          | ❌        |          |
 | `__len__`                           | ❌        |          |
-| `__and__`                           | ❌        |          |
-| `__or__`                            | ❌        |          |
-| `__xor__`                           | ❌        |          |
+| `__and__`                           | ✅        |          |
+| `__or__`                            | ✅        |          |
+| `__xor__`                           | ✅        |          |
 | `__getitem__`                       | ✅        |          |
 | `Model.objects.aiterator`           | ✅        | non-chunked fetch only; server-side cursor streaming pending |
 
