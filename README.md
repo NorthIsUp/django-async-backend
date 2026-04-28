@@ -262,7 +262,7 @@ async def main():
 | `Model.objects.afirst`              | ✅        |          |
 | `Model.objects.alast`               | ✅        |          |
 | `Model.objects.ain_bulk`            | ✅        |          |
-| `Model.objects.adelete`             | ❌        |          |
+| `Model.objects.adelete`             | ✅        | leaf-only; cascading relations not yet supported |
 | `Model.objects.aupdate`             | ✅        |          |
 | `Model.objects.aexists`             | ✅        |          |
 | `Model.objects.acontains`           | ✅        |          |
@@ -312,7 +312,7 @@ Not supported ❌
 | --------------- | --------- | -------- |
 | `Model.asave`   | ✅        | requires `AsyncModelMixin`; multi-table inheritance not yet supported |
 | `Model.aupdate` | ❌        |          |
-| `Model.adelete` | ❌        |          |
+| `Model.adelete` | ✅        | requires `AsyncModelMixin`; leaf-only |
 | `...`           | ❌        |          |
 
 ### User Model / Manager
