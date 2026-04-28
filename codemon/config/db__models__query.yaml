@@ -216,14 +216,6 @@ module:
         __and__:
           remove: true
 
-        only:
-          remove: true
-
-        defer:
-          remove: true
-
-        alias:
-          remove: true
 
         datetimes:
           remove: true
