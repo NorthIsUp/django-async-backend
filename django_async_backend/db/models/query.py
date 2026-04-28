@@ -2,6 +2,7 @@
 from django_async_backend.db import async_connections
 from django_async_backend.db.models import sql as async_sql
 from django_async_backend.db.transaction import (
+    async_atomic,
     async_mark_for_rollback_on_error,
 )
 
@@ -606,41 +607,6 @@ class QuerySet(AltersData):
                     )
             return OnConflict.UPDATE
         return None
-
-    def _handle_order_with_respect_to(self, objs):
-        if objs and (order_wrt := self.model._meta.order_with_respect_to):
-            get_filter_kwargs_for_object = (
-                order_wrt.get_filter_kwargs_for_object
-            )
-            attnames = list(get_filter_kwargs_for_object(objs[0]))
-            group_keys = set()
-            obj_groups = []
-            for obj in objs:
-                group_key = tuple(get_filter_kwargs_for_object(obj).values())
-                group_keys.add(group_key)
-                obj_groups.append((obj, group_key))
-            filters = [
-                Q.create(list(zip(attnames, group_key)))
-                for group_key in group_keys
-            ]
-            next_orders = (
-                self.model._base_manager.using(self.db)
-                .filter(reduce(operator.or_, filters))
-                .values_list(*attnames)
-                .annotate(_order__max=Max("_order") + 1)
-            )
-            # Create mapping of group values to max order.
-            group_next_orders = dict.fromkeys(group_keys, 0)
-            group_next_orders.update(
-                (tuple(group_key), next_order)
-                for *group_key, next_order in next_orders
-            )
-            # Assign _order values to new objects.
-            for obj, group_key in obj_groups:
-                if getattr(obj, "_order", None) is None:
-                    group_next_order = group_next_orders[group_key]
-                    obj._order = group_next_order
-                    group_next_orders[group_key] += 1
 
     def _extract_model_params(self, defaults, **kwargs):
         """
@@ -1279,55 +1245,6 @@ class QuerySet(AltersData):
     _insert.alters_data = True
     _insert.queryset_only = False
 
-    def _batched_insert(
-        self,
-        objs,
-        fields,
-        batch_size,
-        on_conflict=None,
-        update_fields=None,
-        unique_fields=None,
-    ):
-        """
-        Helper method for bulk_create() to insert objs one batch at a time.
-        """
-        connection = connections[self.db]
-        ops = connection.ops
-        max_batch_size = max(ops.bulk_batch_size(fields, objs), 1)
-        batch_size = (
-            min(batch_size, max_batch_size) if batch_size else max_batch_size
-        )
-        inserted_rows = []
-        returning_fields = (
-            self.model._meta.db_returning_fields
-            if (
-                connection.features.can_return_rows_from_bulk_insert
-                and (on_conflict is None or on_conflict == OnConflict.UPDATE)
-            )
-            else None
-        )
-        batches = [
-            objs[i : i + batch_size] for i in range(0, len(objs), batch_size)
-        ]
-        if len(batches) > 1:
-            context = transaction.atomic(using=self.db, savepoint=False)
-        else:
-            context = nullcontext()
-        with context:
-            for item in batches:
-                inserted_rows.extend(
-                    self._insert(
-                        item,
-                        fields=fields,
-                        using=self.db,
-                        on_conflict=on_conflict,
-                        update_fields=update_fields,
-                        unique_fields=unique_fields,
-                        returning_fields=returning_fields,
-                    )
-                )
-        return inserted_rows
-
     def _chain(self):
         """
         Return a copy of the current QuerySet that's ready for another
@@ -1511,6 +1428,189 @@ class QuerySet(AltersData):
             rows = await compiler.execute_sql(ROW_COUNT)
         self._result_cache = None
         return rows
+
+    async def abulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        """
+        Insert each of the instances into the database. Do *not* call
+        save() on each of the instances, do not send any pre/post_save
+        signals, and do not set the primary key attribute if it is an
+        autoincrement field (except if
+        features.can_return_rows_from_bulk_insert=True).
+        Multi-table models are not supported.
+        """
+        if batch_size is not None and batch_size <= 0:
+            raise ValueError("Batch size must be a positive integer.")
+        for parent in self.model._meta.all_parents:
+            if (
+                parent._meta.concrete_model
+                is not self.model._meta.concrete_model
+            ):
+                raise ValueError(
+                    "Can't bulk create a multi-table inherited model"
+                )
+        if not objs:
+            return objs
+        opts = self.model._meta
+        if unique_fields:
+            unique_fields = [
+                self.model._meta.get_field(
+                    opts.pk.name if name == "pk" else name
+                )
+                for name in unique_fields
+            ]
+        if update_fields:
+            update_fields = [
+                self.model._meta.get_field(name) for name in update_fields
+            ]
+        on_conflict = self._check_bulk_create_options(
+            ignore_conflicts,
+            update_conflicts,
+            update_fields,
+            unique_fields,
+        )
+        self._for_write = True
+        fields = [f for f in opts.concrete_fields if not f.generated]
+        objs = list(objs)
+        objs_with_pk, objs_without_pk = self._prepare_for_bulk_create(objs)
+        if objs_with_pk and objs_without_pk:
+            context = async_atomic(using=self.db, savepoint=False)
+        else:
+            context = nullcontext()
+        async with context:
+            await self._handle_order_with_respect_to(objs)
+            if objs_with_pk:
+                returned_columns = await self._batched_insert(
+                    objs_with_pk,
+                    fields,
+                    batch_size,
+                    on_conflict=on_conflict,
+                    update_fields=update_fields,
+                    unique_fields=unique_fields,
+                )
+                for obj_with_pk, results in zip(
+                    objs_with_pk, returned_columns
+                ):
+                    for result, field in zip(
+                        results, opts.db_returning_fields
+                    ):
+                        if field != opts.pk:
+                            setattr(obj_with_pk, field.attname, result)
+                for obj_with_pk in objs_with_pk:
+                    obj_with_pk._state.adding = False
+                    obj_with_pk._state.db = self.db
+            if objs_without_pk:
+                fields = [f for f in fields if not isinstance(f, AutoField)]
+                returned_columns = await self._batched_insert(
+                    objs_without_pk,
+                    fields,
+                    batch_size,
+                    on_conflict=on_conflict,
+                    update_fields=update_fields,
+                    unique_fields=unique_fields,
+                )
+                connection = async_connections[self.db]
+                if (
+                    connection.features.can_return_rows_from_bulk_insert
+                    and on_conflict is None
+                ):
+                    assert len(returned_columns) == len(objs_without_pk)
+                for obj_without_pk, results in zip(
+                    objs_without_pk, returned_columns
+                ):
+                    for result, field in zip(
+                        results, opts.db_returning_fields
+                    ):
+                        setattr(obj_without_pk, field.attname, result)
+                    obj_without_pk._state.adding = False
+                    obj_without_pk._state.db = self.db
+
+        return objs
+
+    async def _handle_order_with_respect_to(self, objs):
+        if objs and (order_wrt := self.model._meta.order_with_respect_to):
+            get_filter_kwargs_for_object = (
+                order_wrt.get_filter_kwargs_for_object
+            )
+            obj_groups = []
+            for obj in objs:
+                key = get_filter_kwargs_for_object(obj)
+                group_key = tuple(key.values())
+                obj_groups.append((obj, group_key))
+            attnames = list(key.keys())
+            group_keys = {gk for _, gk in obj_groups}
+            filters = [
+                Q.create(list(zip(attnames, group_key)))
+                for group_key in group_keys
+            ]
+            next_orders_qs = (
+                self.model._base_manager.using(self.db)
+                .filter(reduce(operator.or_, filters))
+                .values_list(*attnames)
+                .annotate(_order=Max("_order"))
+            )
+            group_next_orders = dict.fromkeys(group_keys, 0)
+            async for row in next_orders_qs:
+                *group_key, next_order = row
+                group_next_orders[tuple(group_key)] = next_order
+            for obj, group_key in obj_groups:
+                if getattr(obj, "_order", None) is None:
+                    obj._order = group_next_orders[group_key]
+                    group_next_orders[group_key] += 1
+
+    async def _batched_insert(
+        self,
+        objs,
+        fields,
+        batch_size,
+        on_conflict=None,
+        update_fields=None,
+        unique_fields=None,
+    ):
+        """
+        Helper method for bulk_create() to insert objs one batch at a time.
+        """
+        connection = async_connections[self.db]
+        ops = connection.ops
+        max_batch_size = max(ops.bulk_batch_size(fields, objs), 1)
+        batch_size = (
+            min(batch_size, max_batch_size) if batch_size else max_batch_size
+        )
+        inserted_rows = []
+        bulk_return = connection.features.can_return_rows_from_bulk_insert
+        batches = [
+            objs[i : i + batch_size] for i in range(0, len(objs), batch_size)
+        ]
+        if len(batches) > 1:
+            context = async_atomic(using=self.db, savepoint=False)
+        else:
+            context = nullcontext()
+        async with context:
+            for item in batches:
+                inserted_rows.extend(
+                    await self._insert(
+                        item,
+                        fields=fields,
+                        using=self.db,
+                        on_conflict=on_conflict,
+                        update_fields=update_fields,
+                        unique_fields=unique_fields,
+                        returning_fields=(
+                            self.model._meta.db_returning_fields
+                            if bulk_return
+                            else None
+                        ),
+                        raw=False,
+                    )
+                )
+        return inserted_rows
 
 
 class InstanceCheckMeta(type):
