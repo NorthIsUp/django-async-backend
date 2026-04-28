@@ -538,6 +538,18 @@ class QuerySet(AltersData):
             )
         )
 
+    async def acreate(self, **kwargs: Any) -> Model:
+        """
+        Create a new object with the given kwargs, saving it to the database
+        and returning the created object.
+        """
+        obj = self.model(**kwargs)
+        self._for_write = True
+        await obj.asave(force_insert=True, using=self.db)
+        return obj
+
+    acreate.alters_data = True
+
     async def abulk_create(
         self,
         objs: Iterable[Model],
