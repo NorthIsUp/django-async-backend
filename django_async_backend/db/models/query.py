@@ -21,6 +21,7 @@ from itertools import (
     islice,
 )
 from collections.abc import (
+    AsyncIterator,
     Iterable,
     Mapping,
     Sequence,
@@ -384,6 +385,46 @@ class QuerySet(AltersData):
                 yield item
 
         return generator()
+
+    async def aiterator(
+        self, chunk_size: int = 2000
+    ) -> AsyncIterator[Model]:
+        """
+        An asynchronous iterator over the results from applying this QuerySet
+        to the database.
+        """
+        if chunk_size <= 0:
+            raise ValueError("Chunk size must be strictly positive.")
+        # Server-side cursors yield an async generator that the existing
+        # iterables don't iterate asynchronously yet. Force non-chunked
+        # fetch until that path is wired through.
+        iterable = self._iterable_class(
+            self,
+            chunked_fetch=False,
+            chunk_size=chunk_size,
+        )
+        if self._prefetch_related_lookups:
+            results: list[Any] = []
+
+            async for item in iterable:
+                results.append(item)
+                if len(results) >= chunk_size:
+                    await aprefetch_related_objects(
+                        results, *self._prefetch_related_lookups
+                    )
+                    for result in results:
+                        yield result
+                    results.clear()
+
+            if results:
+                await aprefetch_related_objects(
+                    results, *self._prefetch_related_lookups
+                )
+                for result in results:
+                    yield result
+        else:
+            async for item in iterable:
+                yield item
 
     def __getitem__(self, k):
         """Retrieve an item or slice from the set of results."""

@@ -300,7 +300,7 @@ async def main():
 | `__or__`                            | ❌        |          |
 | `__xor__`                           | ❌        |          |
 | `__getitem__`                       | ✅        |          |
-| `Model.objects.aiterator`           | ❌        |          |
+| `Model.objects.aiterator`           | ✅        | non-chunked fetch only; server-side cursor streaming pending |
 
 ### RawQuerySet
 
