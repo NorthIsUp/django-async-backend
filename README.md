@@ -290,8 +290,8 @@ async def main():
 | `Model.objects.ordered`             | ❌        |          |
 | `Model.objects.values`              | ✅        |          |
 | `Model.objects.values_list`         | ✅        |          |
-| `Model.objects.dates`               | ❌        |          |
-| `Model.objects.datetimes`           | ❌        |          |
+| `Model.objects.dates`               | ✅        |          |
+| `Model.objects.datetimes`           | ✅        |          |
 | `Model.objects.alias    `           | ✅        |          |
 | `__aiter__`                         | ✅        |          |
 | `__repr__`                          | ❌        |          |
