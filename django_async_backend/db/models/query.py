@@ -1680,6 +1680,16 @@ class QuerySet(AltersData):
                 )
         return rows_updated
 
+    async def acreate(self, **kwargs):
+        """
+        Create a new object with the given kwargs, saving it to the database
+        and returning the created object.
+        """
+        obj = self.model(**kwargs)
+        self._for_write = True
+        await obj.asave(force_insert=True, using=self.db)
+        return obj
+
 
 class InstanceCheckMeta(type):
     def __instancecheck__(self, instance):
