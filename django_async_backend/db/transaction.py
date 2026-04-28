@@ -1,8 +1,13 @@
 import asyncio
+from collections.abc import (
+    Awaitable,
+    Callable,
+)
 from contextlib import (
     AsyncContextDecorator,
     asynccontextmanager,
 )
+from typing import Any
 
 from django.db import (
     DEFAULT_DB_ALIAS,
@@ -11,6 +16,22 @@ from django.db import (
 )
 
 from django_async_backend.db import async_connections
+
+OnCommitCallable = Callable[[], None | Awaitable[Any]]
+
+
+async def aon_commit(
+    func: OnCommitCallable,
+    using: str | None = None,
+    robust: bool = False,
+) -> None:
+    """
+    Register `func` to be called when the current transaction is committed.
+    If the current transaction is rolled back, `func` will not be called.
+    """
+    if using is None:
+        using = DEFAULT_DB_ALIAS
+    await async_connections[using].on_commit(func, robust=robust)
 
 
 @asynccontextmanager
