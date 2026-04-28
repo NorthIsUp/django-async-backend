@@ -1781,6 +1781,42 @@ class QuerySet(AltersData):
                 await obj.asave(using=self.db)
         return obj, False
 
+    async def adelete(self):
+        """
+        Delete the records in the current QuerySet. Returns a tuple of
+        (number_of_objects_deleted, dict_with_per_model_counts).
+
+        Cascade deletes are not yet supported: deleting from a queryset
+        whose model is the target of any reverse relation raises
+        `NotImplementedError`. Use the async Collector once it lands.
+        """
+        self._not_support_combined_queries("delete")
+        if self.query.is_sliced:
+            raise TypeError("Cannot use 'limit' or 'offset' with delete().")
+        if self.query.distinct_fields:
+            raise TypeError("Cannot call delete() after .distinct(*fields).")
+        if self._fields is not None:
+            raise TypeError(
+                "Cannot call delete() after .values() or .values_list()"
+            )
+        if self.model._meta.related_objects:
+            raise NotImplementedError(
+                "Async delete does not yet support cascading relations."
+            )
+
+        del_query = self._chain()
+        del_query._for_write = True
+
+        del_query.query.select_for_update = False
+        del_query.query.select_related = False
+        del_query.query.clear_ordering(force=True)
+
+        async with async_atomic(using=self.db, savepoint=False):
+            deleted = await del_query._raw_delete(using=self.db)
+
+        self._result_cache = None
+        return deleted, {self.model._meta.label: deleted}
+
 
 class InstanceCheckMeta(type):
     def __instancecheck__(self, instance):
