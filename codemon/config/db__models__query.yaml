@@ -681,14 +681,6 @@ module:
         __setstate__:
           remove: true
 
-        __xor__:
-          remove: true
-
-        __or__:
-          remove: true
-
-        __and__:
-          remove: true
 
 
 
