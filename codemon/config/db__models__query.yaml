@@ -255,9 +255,15 @@ module:
           remove: true
 
         bulk_create:
-          # to_async: true
-          # rename: abulk_create
-          remove: true
+          to_async: true
+          rename: abulk_create
+          calls:
+            - func:
+                attr: _batched_insert
+              to_await: true
+            - func:
+                attr: _handle_order_with_respect_to
+              to_await: true
 
         bulk_update:
           # to_async: true

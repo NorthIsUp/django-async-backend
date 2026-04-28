@@ -1,5 +1,6 @@
 import asyncio
 import threading
+from collections.abc import Sequence
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -16,6 +17,7 @@ from django.db.backends.postgresql.psycopg_any import (
 from django_async_backend.db.backends.base.base import BaseAsyncDatabaseWrapper
 from django_async_backend.db.backends.utils import (
     AsyncCursorDebugWrapper as BaseAsyncCursorDebugWrapper,
+    AsyncCursorWrapper,
 )
 
 try:
@@ -44,6 +46,13 @@ class AsyncDatabaseOperations(DatabaseWrapper.ops_class):
 
     async def compose_sql(self, sql, params):
         return await async_mogrify(sql, params, self.connection)
+
+    async def fetch_returned_rows(
+        self,
+        cursor: AsyncCursorWrapper,
+        returning_params: Sequence[object],
+    ) -> list[tuple[object, ...]]:
+        return await cursor.fetchall()
 
     async def last_executed_query(self, cursor, sql, params):
         if self.connection.features.uses_server_side_binding:
