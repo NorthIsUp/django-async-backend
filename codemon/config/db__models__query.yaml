@@ -277,9 +277,21 @@ module:
                   attr: aupdate
 
         get_or_create:
-          # to_async: true
-          # rename: aget_or_create
-          remove: true
+          to_async: true
+          rename: aget_or_create
+          calls:
+            - func:
+                attr: get
+              to_await: true
+              rename:
+                func:
+                  attr: aget
+            - func:
+                attr: create
+              to_await: true
+              rename:
+                func:
+                  attr: acreate
 
         update_or_create:
           # to_async: true

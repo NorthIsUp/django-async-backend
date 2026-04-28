@@ -21,6 +21,7 @@ from itertools import (
 )
 from collections.abc import (
     Iterable,
+    Mapping,
     Sequence,
 )
 from typing import Any
@@ -549,6 +550,37 @@ class QuerySet(AltersData):
         return obj
 
     acreate.alters_data = True
+
+    async def aget_or_create(
+        self,
+        defaults: Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ) -> tuple[Model, bool]:
+        """
+        Look up an object with the given kwargs, creating one if necessary.
+        Return a tuple of (object, created), where created is a boolean
+        specifying whether an object was created.
+        """
+        # The get() needs to be targeted at the write database in order
+        # to avoid potential transaction consistency problems.
+        self._for_write = True
+        try:
+            return await self.aget(**kwargs), False
+        except self.model.DoesNotExist:
+            params = self._extract_model_params(defaults, **kwargs)
+            # Try to create an object using passed params.
+            try:
+                async with async_atomic(using=self.db):
+                    params = dict(resolve_callables(params))
+                    return await self.acreate(**params), True
+            except IntegrityError:
+                try:
+                    return await self.aget(**kwargs), False
+                except self.model.DoesNotExist:
+                    pass
+                raise
+
+    aget_or_create.alters_data = True
 
     async def abulk_create(
         self,
