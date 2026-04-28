@@ -1690,6 +1690,31 @@ class QuerySet(AltersData):
         await obj.asave(force_insert=True, using=self.db)
         return obj
 
+    async def aget_or_create(self, defaults=None, **kwargs):
+        """
+        Look up an object with the given kwargs, creating one if necessary.
+        Return a tuple of (object, created), where created is a boolean
+        specifying whether an object was created.
+        """
+        # The get() needs to be targeted at the write database in order
+        # to avoid potential transaction consistency problems.
+        self._for_write = True
+        try:
+            return await self.aget(**kwargs), False
+        except self.model.DoesNotExist:
+            params = self._extract_model_params(defaults, **kwargs)
+            # Try to create an object using passed params.
+            try:
+                async with async_atomic(using=self.db):
+                    params = dict(resolve_callables(params))
+                    return await self.acreate(**params), True
+            except IntegrityError:
+                try:
+                    return await self.aget(**kwargs), False
+                except self.model.DoesNotExist:
+                    pass
+                raise
+
 
 class InstanceCheckMeta(type):
     def __instancecheck__(self, instance):
