@@ -179,8 +179,6 @@ module:
         prefetch_related:
           remove: true
 
-        select_for_update:
-          remove: true
 
         ain_bulk:
           remove: true
@@ -294,9 +292,21 @@ module:
                   attr: acreate
 
         update_or_create:
-          # to_async: true
-          # rename: aupdate_or_create
-          remove: true
+          to_async: true
+          rename: aupdate_or_create
+          calls:
+            - func:
+                attr: get_or_create
+              to_await: true
+              rename:
+                func:
+                  attr: aget_or_create
+            - func:
+                attr: save
+              to_await: true
+              rename:
+                func:
+                  attr: asave
 
         aggregate:
           to_async: true
