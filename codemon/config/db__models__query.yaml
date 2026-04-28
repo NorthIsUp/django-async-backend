@@ -300,9 +300,15 @@ module:
               to_await: true
 
         contains:
-          # to_async: true
-          # rename: acontains
-          remove: true
+          to_async: true
+          rename: acontains
+          calls:
+            - func:
+                attr: exists
+              to_await: true
+              rename:
+                func:
+                  attr: aexists
 
         first:
           to_async: true
