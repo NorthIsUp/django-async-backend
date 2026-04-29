@@ -286,8 +286,8 @@ async def main():
 | `Model.objects.defer`               | ✅        | accessing a deferred field triggers a sync reload, which is unsupported |
 | `Model.objects.only`                | ✅        |          |
 | `Model.objects.using`               | ✅        |          |
-| `Model.objects.resolve_expression`  | ❌        |          |
-| `Model.objects.ordered`             | ❌        |          |
+| `Model.objects.resolve_expression`  | ✅        |          |
+| `Model.objects.ordered`             | ✅        |          |
 | `Model.objects.values`              | ✅        |          |
 | `Model.objects.values_list`         | ✅        |          |
 | `Model.objects.dates`               | ✅        |          |

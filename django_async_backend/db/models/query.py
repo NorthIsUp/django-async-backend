@@ -1899,7 +1899,7 @@ class QuerySet(AltersData):
     ###################################
 
     @property
-    def ordered(self):
+    def ordered(self) -> bool:
         """
         Return True if the QuerySet is ordered -- i.e. has an order_by()
         clause or a default ordering on the model (or is empty).
@@ -2082,7 +2082,7 @@ class QuerySet(AltersData):
         for field, objects in other._known_related_objects.items():
             self._known_related_objects.setdefault(field, {}).update(objects)
 
-    def resolve_expression(self, *args, **kwargs):
+    def resolve_expression(self, *args: Any, **kwargs: Any) -> Any:
         query = self.query.resolve_expression(*args, **kwargs)
         query._db = self._db
         return query
