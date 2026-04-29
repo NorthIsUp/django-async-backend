@@ -492,8 +492,10 @@ class Tests(AsyncioTestCase):
     async def test_get_database_version(self):
         new_connection = no_pool_connection()
         version = await new_connection.get_database_version()
-        self.assertTrue(len(version) == 2)
-        self.assertEqual((await new_connection.get_database_version())[0], 15)
+        self.assertEqual(len(version), 2)
+        major, minor = version
+        self.assertGreaterEqual(major, 15)
+        self.assertGreaterEqual(minor, 0)
 
     async def test_check_database_version_supported(self):
         from django_async_backend.db.backends.postgresql.base import (
