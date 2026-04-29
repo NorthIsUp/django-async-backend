@@ -352,6 +352,93 @@ class AsyncModelMixin:
                 self._assign_returned_values(results[0], returning_fields)
         return updated
 
+    async def arefresh_from_db(
+        self,
+        using: str | None = None,
+        fields: Iterable[str] | None = None,
+        from_queryset: "QuerySet | None" = None,
+    ) -> None:
+        """
+        Async equivalent of Model.refresh_from_db(). Reload field values
+        from the database.
+        """
+        from django.db.models.constants import LOOKUP_SEP
+
+        if fields is None:
+            self._prefetched_objects_cache = {}
+        else:
+            prefetched_objects_cache = getattr(
+                self, "_prefetched_objects_cache", ()
+            )
+            fields = set(fields)
+            for field in fields.copy():
+                if field in prefetched_objects_cache:
+                    del prefetched_objects_cache[field]
+                    fields.remove(field)
+            if not fields:
+                return
+            if any(LOOKUP_SEP in f for f in fields):
+                raise ValueError(
+                    'Found "%s" in fields argument. Relations and '
+                    "transforms are not allowed in fields." % LOOKUP_SEP
+                )
+
+        if from_queryset is None:
+            from_queryset = _async_base_manager(self.__class__).using(
+                using
+            )
+        elif using is not None:
+            from_queryset = from_queryset.using(using)
+
+        db_instance_qs = from_queryset.filter(pk=self.pk)
+
+        deferred_fields = self.get_deferred_fields()
+        if fields is not None:
+            db_instance_qs = db_instance_qs.only(*fields)
+        elif deferred_fields:
+            db_instance_qs = db_instance_qs.only(
+                *{
+                    f.attname
+                    for f in self._meta.concrete_fields
+                    if f.attname not in deferred_fields
+                }
+            )
+
+        db_instance = await db_instance_qs.aget()
+        non_loaded_fields = db_instance.get_deferred_fields()
+        for field in self._meta.fields:
+            if field.attname in non_loaded_fields:
+                continue
+            if field.concrete:
+                setattr(
+                    self, field.attname, getattr(db_instance, field.attname)
+                )
+            if field.is_relation:
+                if field.is_cached(db_instance):
+                    field.set_cached_value(
+                        self, field.get_cached_value(db_instance)
+                    )
+                elif field.is_cached(self):
+                    field.delete_cached_value(self)
+
+        # Clear cached relations.
+        for rel in self._meta.related_objects:
+            if (fields is None or rel.name in fields) and rel.is_cached(
+                self
+            ):
+                rel.delete_cached_value(self)
+
+        # Clear cached private relations.
+        for field in self._meta.private_fields:
+            if (
+                (fields is None or field.name in fields)
+                and field.is_relation
+                and field.is_cached(self)
+            ):
+                field.delete_cached_value(self)
+
+        self._state.db = db_instance._state.db
+
     async def adelete(
         self, using: str | None = None, keep_parents: bool = False
     ) -> tuple[int, dict[str, int]]:
