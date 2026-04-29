@@ -1590,7 +1590,7 @@ class QuerySet(AltersData):
             return self
         return self._combinator_query("difference", *other_qs)
 
-    def select_related(self, *fields):
+    def select_related(self, *fields: str | None) -> "QuerySet":
         """
         Return a new QuerySet instance that will select related objects.
 
