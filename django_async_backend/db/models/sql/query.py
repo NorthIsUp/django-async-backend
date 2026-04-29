@@ -211,7 +211,14 @@ class RawQuery:
     def get_columns(self):
         if self.cursor is None:
             self._execute_query()
-        converter = connections[self.using].introspection.identifier_converter
+        # Identifier-case conversion lives on Django's sync introspection
+        # API; the async wrapper doesn't ship one yet, so route through the
+        # sync `connections` handler.
+        from django.db import connections as sync_connections
+
+        converter = sync_connections[
+            self.using
+        ].introspection.identifier_converter
         return [
             converter(column_meta[0])
             for column_meta in self.cursor.description
@@ -228,6 +235,19 @@ class RawQuery:
         else:
             result = self.cursor
         return iter(result)
+
+    def __aiter__(self):
+        async def gen():
+            await self._aexecute_query()
+            # `cursor` is an async cursor; materialize all rows so callers
+            # can iterate synchronously below this layer. The cursor is
+            # left open so `description` and `get_columns()` remain usable
+            # after iteration; RawModelIterable closes it when done.
+            rows = await self.cursor.fetchall()
+            for row in rows:
+                yield row
+
+        return gen()
 
     def __repr__(self):
         return "<%s: %s>" % (self.__class__.__name__, self)
@@ -261,6 +281,22 @@ class RawQuery:
 
         self.cursor = connection.cursor()
         self.cursor.execute(self.sql, params)
+
+    async def _aexecute_query(self):
+        connection = connections[self.using]
+        params_type = self.params_type
+        adapter = connection.ops.adapt_unknown_value
+        if params_type is tuple:
+            params = tuple(adapter(val) for val in self.params)
+        elif params_type is dict:
+            params = {key: adapter(val) for key, val in self.params.items()}
+        elif params_type is None:
+            params = None
+        else:
+            raise RuntimeError("Unexpected params type: %s" % params_type)
+
+        self.cursor = await connection.cursor()
+        await self.cursor.execute(self.sql, params)
 
 
 ExplainInfo = namedtuple("ExplainInfo", ("format", "options"))

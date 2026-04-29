@@ -182,11 +182,11 @@ class RawModelIterable(BaseIterable):
         # Cache some things for performance reasons outside the loop.
         db = self.queryset.db
         query = self.queryset.query
-        connection = connections[db]
+        connection = async_connections[db]
         compiler = connection.ops.compiler("SQLCompiler")(
             query, connection, db
         )
-        query_iterator = iter(query)
+        query_iterator = [row async for row in query]
 
         try:
             (
@@ -231,8 +231,10 @@ class RawModelIterable(BaseIterable):
                 yield instance
         finally:
             # Done iterating the Query. If it has its own cursor, close it.
-            if hasattr(query, "cursor") and query.cursor:
-                query.cursor.close()
+            # The async path closes the cursor inside RawQuery.__aiter__.
+            cursor = getattr(query, "cursor", None)
+            if cursor is not None and not cursor.closed:
+                await cursor.close()
 
 
 class ValuesIterable(BaseIterable):
@@ -443,6 +445,29 @@ class QuerySet(AltersData):
             )
         combined.query.combine(other.query, sql.XOR)
         return combined
+
+    def araw(
+        self,
+        raw_query: str,
+        params: tuple[Any, ...] | list[Any] | dict[str, Any] = (),
+        translations: dict[str, str] | None = None,
+        using: str | None = None,
+    ) -> "RawQuerySet":
+        """
+        Return a RawQuerySet that runs a raw SQL query and yields model
+        instances. Async iteration is supported via `async for`.
+        """
+        if using is None:
+            using = self.db
+        qs = RawQuerySet(
+            raw_query,
+            model=self.model,
+            params=params,
+            translations=translations,
+            using=using,
+        )
+        qs._prefetch_related_lookups = self._prefetch_related_lookups[:]
+        return qs
 
     async def aiterator(
         self, chunk_size: int = 2000
@@ -2159,7 +2184,7 @@ class RawQuerySet:
         self.model = model
         self._db = using
         self._hints = hints or {}
-        self.query = query or sql.RawQuery(
+        self.query = query or async_sql.RawQuery(
             sql=raw_query, using=self.db, params=params
         )
         self.params = params
@@ -2240,11 +2265,20 @@ class RawQuerySet:
         # Remember, __aiter__ itself is synchronous, it's the thing it returns
         # that is async!
         async def generator():
-            await sync_to_async(self._fetch_all)()
+            await self._afetch_all()
             for item in self._result_cache:
                 yield item
 
         return generator()
+
+    async def _afetch_all(self) -> None:
+        if self._result_cache is None:
+            self._result_cache = [item async for item in RawModelIterable(self)]
+        if self._prefetch_related_lookups and not self._prefetch_done:
+            await aprefetch_related_objects(
+                self._result_cache, *self._prefetch_related_lookups
+            )
+            self._prefetch_done = True
 
     def iterator(self):
         yield from RawModelIterable(self)

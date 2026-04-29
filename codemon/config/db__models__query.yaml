@@ -170,11 +170,8 @@ module:
         alatest:
           remove: true
 
-        araw:
-          remove: true
-
         raw:
-          remove: true
+          rename: araw
 
         prefetch_related:
           remove: true
