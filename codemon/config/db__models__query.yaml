@@ -644,11 +644,8 @@ module:
         alatest:
           remove: true
 
-        araw:
-          remove: true
-
         raw:
-          remove: true
+          rename: araw
 
         prefetch_related:
           remove: true
@@ -900,8 +897,62 @@ module:
     RawModelIterable:
       methods:
         __iter__:
-          rename: __aiter__
-          to_async: true
+          remove: true
+      add_raw_bottom:
+        - |
+          async def __aiter__(self):
+              # Cache some things for performance reasons outside the loop.
+              db = self.queryset.db
+              query = self.queryset.query
+              connection = async_connections[db]
+              compiler = connection.ops.compiler("SQLCompiler")(
+                  query, connection, db
+              )
+              query_iterator = [row async for row in query]
+
+              try:
+                  (
+                      model_init_names,
+                      model_init_pos,
+                      annotation_fields,
+                  ) = self.queryset.resolve_model_init_order()
+                  model_cls = self.queryset.model
+                  if model_cls._meta.pk.attname not in model_init_names:
+                      raise exceptions.FieldDoesNotExist(
+                          "Raw query must include the primary key"
+                      )
+                  fields = [
+                      self.queryset.model_fields.get(c)
+                      for c in self.queryset.columns
+                  ]
+                  converters = compiler.get_converters(
+                      [f.get_col(f.model._meta.db_table) if f else None for f in fields]
+                  )
+                  if converters:
+                      query_iterator = compiler.apply_converters(
+                          query_iterator, converters
+                      )
+                  for values in query_iterator:
+                      # Associate fields to values
+                      model_init_values = [
+                          values[pos] for pos in model_init_pos
+                      ]
+                      instance = model_cls.from_db(
+                          db, model_init_names, model_init_values
+                      )
+                      if annotation_fields:
+                          for column, pos in annotation_fields:
+                              setattr(
+                                  instance, column, values[pos]
+                              )
+                      yield instance
+              finally:
+                  # Done iterating the Query. If it has its own cursor,
+                  # close it. The async path closes the cursor inside
+                  # RawQuery.__aiter__.
+                  cursor = getattr(query, "cursor", None)
+                  if cursor is not None and not cursor.closed:
+                      await cursor.close()
 
     ValuesIterable:
       methods:
