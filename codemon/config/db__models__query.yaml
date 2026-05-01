@@ -2,7 +2,9 @@ pathname: db/models/query.py
 
 module:
   new_imports:
+    - "from django_async_backend.db import async_connections"
     - "from django_async_backend.db.models import sql as async_sql"
+    - "from django_async_backend.db.transaction import async_mark_for_rollback_on_error"
 
   functions:
     prefetch_related_objects:
@@ -14,6 +16,56 @@ module:
 
   classes:
     QuerySet:
+      add_raw_bottom:
+        - |
+          async def aupdate(self, **kwargs):
+              """
+              Update all elements in the current QuerySet, setting all the given
+              fields to the appropriate values.
+              """
+              self._not_support_combined_queries("update")
+              if self.query.is_sliced:
+                  raise TypeError(
+                      "Cannot update a query once a slice has been taken."
+                  )
+              self._for_write = True
+              query = self.query.chain(sql.UpdateQuery)
+              query.add_update_values(kwargs)
+
+              # Inline annotations in order_by(), if possible.
+              new_order_by = []
+              for col in query.order_by:
+                  alias = col
+                  descending = False
+                  if isinstance(alias, str) and alias.startswith("-"):
+                      alias = alias.removeprefix("-")
+                      descending = True
+                  if annotation := query.annotations.get(alias):
+                      if getattr(annotation, "contains_aggregate", False):
+                          raise exceptions.FieldError(
+                              f"Cannot update when ordering by an aggregate: "
+                              f"{annotation}"
+                          )
+                      if descending:
+                          annotation = annotation.desc()
+                      new_order_by.append(annotation)
+                  else:
+                      new_order_by.append(col)
+              query.order_by = tuple(new_order_by)
+
+              # Clear SELECT clause as all annotation references were inlined by
+              # add_update_values() already.
+              query.clear_select_clause()
+              async with async_mark_for_rollback_on_error(using=self.db):
+                  compiler = query.get_compiler(
+                      connection=async_connections[self.db]
+                  )
+                  rows = await compiler.execute_sql(ROW_COUNT)
+              self._result_cache = None
+              return rows
+
+          aupdate.alters_data = True
+          aupdate.queryset_only = False
       assigns:
         - target:
             name: create
@@ -359,13 +411,10 @@ module:
           remove: true
 
         update:
+          # aupdate is injected via add_raw_bottom because it wraps
+          # execute_sql in async_mark_for_rollback_on_error, which the
+          # current call/return transforms can't express.
           remove: true
-          # to_async: true
-          # rename: aupdate
-          # calls:
-          #   - func:
-          #       attr: execute_sql
-          #     to_await: true
 
         iterator:
           # to_async: true
@@ -378,6 +427,9 @@ module:
             - func:
                 attr: execute_sql
               to_await: true
+            - func:
+                attr: get_compiler
+              replace_raw: 'query.get_compiler(connection=async_connections[using])'
 
         _update:
           to_async: true
@@ -385,6 +437,12 @@ module:
             - func:
                 attr: execute_sql
               to_await: true
+            - func:
+                attr: execute_returning_sql
+              to_await: true
+            - func:
+                attr: get_compiler
+              replace_raw: 'query.get_compiler(connection=async_connections[self.db])'
 
         _insert:
           to_async: true
@@ -392,6 +450,9 @@ module:
             - func:
                 attr: execute_sql
               to_await: true
+            - func:
+                attr: get_compiler
+              replace_raw: 'query.get_compiler(connection=async_connections[using])'
 
         __aiter__:
           calls:
