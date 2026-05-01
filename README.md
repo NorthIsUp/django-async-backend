@@ -311,7 +311,7 @@ Not supported ❌
 | methods         | supported | comments |
 | --------------- | --------- | -------- |
 | `Model.asave`   | ✅        | requires `AsyncModelMixin`; multi-table inheritance not yet supported |
-| `Model.aupdate` | ❌        |          |
+| `Model.arefresh_from_db` | ✅        | requires `AsyncModelMixin` |
 | `Model.adelete` | ✅        | requires `AsyncModelMixin`; leaf-only |
 | `...`           | ❌        |          |
 
