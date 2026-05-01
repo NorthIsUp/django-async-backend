@@ -210,6 +210,56 @@ def add_raw_top_to_function(updated_node, add_raw_top):
     )
 
 
+def _parse_annotation(source: str) -> cst.Annotation:
+    """Parse a type-annotation string (e.g. ``"int | None"``) into a cst.Annotation."""
+    expression = cst.parse_module(f"x: {source}").body[0].body[0].annotation.annotation
+    return cst.Annotation(annotation=expression)
+
+
+def apply_signature_annotations(updated_node, annotations, returns):
+    """Set parameter and return annotations on a FunctionDef.
+
+    `annotations` is a {param_name: type_string} dict; pass an empty string to
+    strip an existing annotation. `returns` is a type-annotation string for
+    the return type, or None to leave it unchanged.
+    """
+    if annotations:
+        params = updated_node.params
+
+        def _annotate(param: cst.Param) -> cst.Param:
+            name = param.name.value
+            if name not in annotations:
+                return param
+            spec = annotations[name]
+            if spec == "":
+                return param.with_changes(annotation=None)
+            return param.with_changes(annotation=_parse_annotation(spec))
+
+        new_params = params.with_changes(
+            params=[_annotate(p) for p in params.params],
+            kwonly_params=[_annotate(p) for p in params.kwonly_params],
+            posonly_params=[_annotate(p) for p in params.posonly_params],
+            star_arg=(
+                _annotate(params.star_arg)
+                if isinstance(params.star_arg, cst.Param)
+                else params.star_arg
+            ),
+            star_kwarg=(
+                _annotate(params.star_kwarg)
+                if params.star_kwarg is not None
+                else params.star_kwarg
+            ),
+        )
+        updated_node = updated_node.with_changes(params=new_params)
+
+    if returns is not None:
+        updated_node = updated_node.with_changes(
+            returns=_parse_annotation(returns)
+        )
+
+    return updated_node
+
+
 def add_raw_bottom_to_function(updated_node, add_raw_top):
     blocks = []
     for code in add_raw_top:
@@ -374,6 +424,18 @@ def function_transformer(name: str, config: Function) -> cst.CSTTransformer:
             ) -> cst.FunctionDef:
                 return add_raw_top_to_function(
                     updated_node, config.add_raw_top
+                )
+
+        if config.annotations or config.returns:
+
+            @m.leave(m.FunctionDef())
+            def annotate(
+                self,
+                original_node: cst.FunctionDef,
+                updated_node: cst.FunctionDef,
+            ) -> cst.FunctionDef:
+                return apply_signature_annotations(
+                    updated_node, config.annotations, config.returns
                 )
 
         if config.remove:
@@ -554,6 +616,18 @@ def method_transformer(name: str, config: Method) -> cst.CSTTransformer:
             ) -> cst.FunctionDef:
                 return add_raw_bottom_to_function(
                     updated_node, config.add_raw_bottom
+                )
+
+        if config.annotations or config.returns:
+
+            @m.leave(m.FunctionDef())
+            def annotate(
+                self,
+                original_node: cst.FunctionDef,
+                updated_node: cst.FunctionDef,
+            ) -> cst.FunctionDef:
+                return apply_signature_annotations(
+                    updated_node, config.annotations, config.returns
                 )
 
         if config.for_statements:

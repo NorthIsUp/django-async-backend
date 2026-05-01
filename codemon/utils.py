@@ -102,6 +102,8 @@ class Method(BaseModel):
     context_managers: list[ContextManagers] | None = None
     return_blocks: list[ReturnBlock] | None = None
     comp_for_blocks: list[CompForBlock] | None = None
+    annotations: dict[str, str] | None = None
+    returns: str | None = None
 
 
 class Class(BaseModel):
@@ -119,6 +121,8 @@ class Function(BaseModel):
     return_blocks: list[ReturnBlock] | None = None
     remove: bool = False
     comp_for_blocks: list[CompForBlock] | None = None
+    annotations: dict[str, str] | None = None
+    returns: str | None = None
 
 
 class ImportAlias(BaseModel):
