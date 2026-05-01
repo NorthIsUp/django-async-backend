@@ -168,16 +168,15 @@ class RawModelIterable(BaseIterable):
     """
     Iterable that yields a model instance for each row from a raw queryset.
     """
-
     async def __aiter__(self):
         # Cache some things for performance reasons outside the loop.
         db = self.queryset.db
         query = self.queryset.query
-        connection = connections[db]
+        connection = async_connections[db]
         compiler = connection.ops.compiler("SQLCompiler")(
             query, connection, db
         )
-        query_iterator = iter(query)
+        query_iterator = [row async for row in query]
 
         try:
             (
@@ -186,10 +185,7 @@ class RawModelIterable(BaseIterable):
                 annotation_fields,
             ) = self.queryset.resolve_model_init_order()
             model_cls = self.queryset.model
-            if any(
-                f.attname not in model_init_names
-                for f in model_cls._meta.pk_fields
-            ):
+            if model_cls._meta.pk.attname not in model_init_names:
                 raise exceptions.FieldDoesNotExist(
                     "Raw query must include the primary key"
                 )
@@ -197,18 +193,15 @@ class RawModelIterable(BaseIterable):
                 self.queryset.model_fields.get(c)
                 for c in self.queryset.columns
             ]
-            cols = [
-                f.get_col(f.model._meta.db_table) if f else None
-                for f in fields
-            ]
-            converters = compiler.get_converters(cols)
+            converters = compiler.get_converters(
+                [
+                    f.get_col(f.model._meta.db_table) if f else None
+                    for f in fields
+                ]
+            )
             if converters:
                 query_iterator = compiler.apply_converters(
                     query_iterator, converters
-                )
-            if compiler.has_composite_fields(cols):
-                query_iterator = compiler.composite_fields_to_tuples(
-                    query_iterator, cols
                 )
             for values in query_iterator:
                 # Associate fields to values
@@ -221,9 +214,12 @@ class RawModelIterable(BaseIterable):
                         setattr(instance, column, values[pos])
                 yield instance
         finally:
-            # Done iterating the Query. If it has its own cursor, close it.
-            if hasattr(query, "cursor") and query.cursor:
-                query.cursor.close()
+            # Done iterating the Query. If it has its own cursor,
+            # close it. The async path closes the cursor inside
+            # RawQuery.__aiter__.
+            cursor = getattr(query, "cursor", None)
+            if cursor is not None and not cursor.closed:
+                await cursor.close()
 
 
 class ValuesIterable(BaseIterable):
@@ -885,6 +881,23 @@ class QuerySet(AltersData):
         return await self.query.explain(
             using=self.db, format=format, **options
         )
+
+    ##################################################
+    # PUBLIC METHODS THAT RETURN A QUERYSET SUBCLASS #
+    ##################################################
+
+    def araw(self, raw_query, params=(), translations=None, using=None):
+        if using is None:
+            using = self.db
+        qs = RawQuerySet(
+            raw_query,
+            model=self.model,
+            params=params,
+            translations=translations,
+            using=using,
+        )
+        qs._prefetch_related_lookups = self._prefetch_related_lookups[:]
+        return qs
 
     def _values(self, *fields, **expressions):
         clone = self._chain()

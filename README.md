@@ -267,7 +267,7 @@ async def main():
 | `Model.objects.aexists`             | ✅        |          |
 | `Model.objects.acontains`           | ✅        |          |
 | `Model.objects.aexplain`            | ✅        |          |
-| `Model.objects.araw`                | ❌        |          |
+| `Model.objects.araw`                | ✅        |          |
 | `Model.objects.all`                 | ✅        |          |
 | `Model.objects.filter`              | ✅        |          |
 | `Model.objects.exclude`             | ✅        |          |
