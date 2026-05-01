@@ -17,7 +17,9 @@ from django.db.models import (
     Model,
 )
 from django.db.models.signals import (
+    post_delete,
     post_save,
+    pre_delete,
     pre_save,
 )
 
@@ -349,6 +351,59 @@ class AsyncModelMixin:
             if results:
                 self._assign_returned_values(results[0], returning_fields)
         return updated
+
+    async def adelete(
+        self, using: str | None = None, keep_parents: bool = False
+    ) -> tuple[int, dict[str, int]]:
+        """
+        Async delete for a single instance.
+
+        Fires `pre_delete` and `post_delete` signals via `Signal.asend`.
+        Cascade deletes are not yet supported: deleting an instance whose
+        model is the target of any reverse relation raises
+        `NotImplementedError`. Use the async Collector once it lands.
+        """
+        if not self._is_pk_set():
+            raise ValueError(
+                "%s object can't be deleted because its %s attribute is "
+                "set to None."
+                % (self._meta.object_name, self._meta.pk.attname)
+            )
+        if keep_parents:
+            raise NotImplementedError(
+                "Async delete does not yet support keep_parents."
+            )
+        if self._meta.related_objects:
+            raise NotImplementedError(
+                "Async delete does not yet support cascading relations."
+            )
+        using = using or router.db_for_write(
+            self.__class__, instance=self
+        )
+        cls = origin = self.__class__
+        if cls._meta.proxy:
+            cls = cls._meta.concrete_model
+        meta = cls._meta
+
+        if not meta.auto_created:
+            await pre_delete.asend(
+                sender=origin, instance=self, using=using, origin=self
+            )
+
+        async with async_atomic(using=using, savepoint=False):
+            count = await _async_base_manager(cls).using(using).filter(
+                pk=self.pk
+            )._raw_delete(using=using)
+
+        if not meta.auto_created:
+            await post_delete.asend(
+                sender=origin, instance=self, using=using, origin=self
+            )
+
+        setattr(self, meta.pk.attname, None)
+        return count, {meta.label: count}
+
+    adelete.alters_data = True
 
     async def _ado_insert(
         self,
