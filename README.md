@@ -133,14 +133,20 @@ async with async_atomic():
 
 ### Using `on_commit` with async transactions
 
-You can register a callback to run after a successful transaction commit using `connection.on_commit`.
+You can register a callback to run after a successful transaction commit. Use the
+module-level `aon_commit` helper (mirrors `django.db.transaction.on_commit`):
 
 ```python
-connection = async_connections[DEFAULT_DB_ALIAS]
+from django_async_backend.db.transaction import aon_commit, async_atomic
 
 async with async_atomic():
-    await connection.on_commit(callback)
+    await aon_commit(callback)            # default alias
+    await aon_commit(callback, using="other", robust=True)
 ```
+
+`aon_commit` accepts both sync and async callables. Outside a transaction
+the callback runs immediately. Callbacks registered inside a block that
+rolls back are discarded.
 
 ## Writing Async Tests
 
