@@ -87,6 +87,33 @@ async with await connection.cursor() as cursor:
     row = await cursor.fetchone()
 ```
 
+## Async Models
+
+Mix `AsyncModelMixin` into your model to enable `await obj.asave()` and
+the async manager's `await Model.async_object.acreate(...)`. The mixin
+dispatches `pre_save` and `post_save` signals via `Signal.asend`.
+
+```python
+from django.db import models
+
+from django_async_backend.db.models.base import AsyncModelMixin
+from django_async_backend.db.models.manager import AsyncManager
+
+
+class Article(AsyncModelMixin, models.Model):
+    title = models.CharField(max_length=200)
+    body = models.TextField()
+
+    async_object = AsyncManager()
+
+
+obj = await Article.async_object.acreate(title="Hello", body="...")
+obj.title = "Hi"
+await obj.asave(update_fields=["title"])
+```
+
+Multi-table inheritance is not yet supported in async save.
+
 ## Async Transactions with `async_atomic`
 
 ### Basic Usage
@@ -223,7 +250,7 @@ async def main():
 | methods                             | supported | comments |
 | ----------------------------------- | --------- | -------- |
 | `Model.objects.aget`                | ✅        |          |
-| `Model.objects.acreate`             | ❌        |          |
+| `Model.objects.acreate`             | ✅        |          |
 | `Model.objects.acount`              | ✅        |          |
 | `Model.objects.none`                | ✅        |          |
 | `Model.objects.abulk_create`        | ✅        |          |
@@ -283,7 +310,7 @@ Not supported ❌
 
 | methods         | supported | comments |
 | --------------- | --------- | -------- |
-| `Model.asave`   | ❌        |          |
+| `Model.asave`   | ✅        | requires `AsyncModelMixin`; multi-table inheritance not yet supported |
 | `Model.aupdate` | ❌        |          |
 | `Model.adelete` | ❌        |          |
 | `...`           | ❌        |          |

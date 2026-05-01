@@ -10,8 +10,8 @@ class TestMock(TestCase):
 
 class TestACount(AsyncioTestCase):
     async def test_acount(self):
-        await TestModel.async_object.acreate(1)
-        await TestModel.async_object.acreate(2)
+        await TestModel.async_object.acreate(name="1")
+        await TestModel.async_object.acreate(name="2")
 
         self.assertEqual(
             await TestModel.async_object.acount(),

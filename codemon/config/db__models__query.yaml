@@ -324,6 +324,18 @@ module:
               return rows_updated
 
           abulk_update.alters_data = True
+        - |
+          async def acreate(self, **kwargs):
+              """
+              Create a new object with the given kwargs, saving it to the database
+              and returning the created object.
+              """
+              obj = self.model(**kwargs)
+              self._for_write = True
+              await obj.asave(force_insert=True, using=self.db)
+              return obj
+
+          acreate.alters_data = True
       assigns:
         - target:
             name: create
