@@ -108,6 +108,8 @@ class Class(BaseModel):
     rename: str | None = None
     methods: dict[str, Method]
     assigns: list[Assign] | None = None
+    add_raw_bottom: list[str] = None
+    add_raw_top: list[str] = None
 
 
 class Function(BaseModel):
