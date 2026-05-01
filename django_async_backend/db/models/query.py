@@ -1077,6 +1077,13 @@ class QuerySet(AltersData):
         self._not_support_combined_queries("annotate")
         return self._annotate(args, kwargs, select=True)
 
+    def alias(self, *args, **kwargs):
+        """
+        Return a query set with added aliases for extra data or aggregations.
+        """
+        self._not_support_combined_queries("alias")
+        return self._annotate(args, kwargs, select=False)
+
     def _annotate(self, args, kwargs, select=True):
         self._validate_values_are_expressions(
             args + tuple(kwargs.values()), method_name="annotate"
@@ -1189,6 +1196,50 @@ class QuerySet(AltersData):
             )
         clone = self._chain()
         clone.query.standard_ordering = not clone.query.standard_ordering
+        return clone
+
+    def defer(self, *fields):
+        """
+        Defer the loading of data for certain fields until they are accessed.
+        Add the set of deferred fields to any existing set of deferred fields.
+        The only exception to this is if None is passed in as the only
+        parameter, in which case remove all deferrals.
+        """
+        self._not_support_combined_queries("defer")
+        if self._fields is not None:
+            raise TypeError(
+                "Cannot call defer() after .values() or .values_list()"
+            )
+        clone = self._chain()
+        if fields == (None,):
+            clone.query.clear_deferred_loading()
+        else:
+            clone.query.add_deferred_loading(fields)
+        return clone
+
+    def only(self, *fields):
+        """
+        Essentially, the opposite of defer(). Only the fields passed into this
+        method and that are not already specified as deferred are loaded
+        immediately when the queryset is evaluated.
+        """
+        self._not_support_combined_queries("only")
+        if self._fields is not None:
+            raise TypeError(
+                "Cannot call only() after .values() or .values_list()"
+            )
+        if fields == (None,):
+            # Can only pass None to defer(), not only(), as the rest option.
+            # That won't stop people trying to do this, so let's be explicit.
+            raise TypeError("Cannot pass None as an argument to only().")
+        for field in fields:
+            field = field.split(LOOKUP_SEP, 1)[0]
+            if field in self.query._filtered_relations:
+                raise ValueError(
+                    "only() is not supported with FilteredRelation."
+                )
+        clone = self._chain()
+        clone.query.add_immediate_loading(fields)
         return clone
 
     def using(self, alias):
