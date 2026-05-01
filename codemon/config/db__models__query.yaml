@@ -450,6 +450,44 @@ module:
 
           adelete.alters_data = True
           adelete.queryset_only = True
+        - |
+          async def aiterator(self, chunk_size=2000):
+              """
+              An asynchronous iterator over the results from applying this
+              QuerySet to the database.
+              """
+              if chunk_size <= 0:
+                  raise ValueError("Chunk size must be strictly positive.")
+              # Server-side cursors yield an async generator that the existing
+              # iterables don't iterate asynchronously yet. Force non-chunked
+              # fetch until that path is wired through.
+              iterable = self._iterable_class(
+                  self,
+                  chunked_fetch=False,
+                  chunk_size=chunk_size,
+              )
+              if self._prefetch_related_lookups:
+                  results = []
+
+                  async for item in iterable:
+                      results.append(item)
+                      if len(results) >= chunk_size:
+                          await aprefetch_related_objects(
+                              results, *self._prefetch_related_lookups
+                          )
+                          for result in results:
+                              yield result
+                          results.clear()
+
+                  if results:
+                      await aprefetch_related_objects(
+                          results, *self._prefetch_related_lookups
+                      )
+                      for result in results:
+                          yield result
+              else:
+                  async for item in iterable:
+                      yield item
       assigns:
         - target:
             name: create
