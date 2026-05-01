@@ -638,6 +638,34 @@ def class_transformer(name: str, config: Class) -> cst.CSTTransformer:
 
                 return updated_node
 
+        if config.add_raw_bottom or config.add_raw_top:
+
+            @m.leave(m.ClassDef())
+            def add_raw_class_body(
+                self,
+                original_node: cst.ClassDef,
+                updated_node: cst.ClassDef,
+            ) -> cst.ClassDef:
+                top_blocks = []
+                for code in config.add_raw_top or []:
+                    top_blocks.append(
+                        cst.parse_module(dedent(code)).body[0]
+                    )
+                bottom_blocks = []
+                for code in config.add_raw_bottom or []:
+                    bottom_blocks.append(
+                        cst.parse_module(dedent(code)).body[0]
+                    )
+                return updated_node.with_changes(
+                    body=updated_node.body.with_changes(
+                        body=[
+                            *top_blocks,
+                            *updated_node.body.body,
+                            *bottom_blocks,
+                        ]
+                    )
+                )
+
     return ClassTransformed()
 
 
