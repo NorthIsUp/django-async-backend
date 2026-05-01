@@ -238,7 +238,7 @@ async def main():
 | `Model.objects.adelete`             | ❌        |          |
 | `Model.objects.aupdate`             | ❌        |          |
 | `Model.objects.aexists`             | ✅        |          |
-| `Model.objects.acontains`           | ❌        |          |
+| `Model.objects.acontains`           | ✅        |          |
 | `Model.objects.aexplain`            | ✅        |          |
 | `Model.objects.araw`                | ❌        |          |
 | `Model.objects.all`                 | ✅        |          |
